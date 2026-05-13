@@ -1,0 +1,18 @@
+title = "Subtrack"
+baseURL = "/"
+relativeURLs = true
+disableKinds = ["page", "section", "taxonomy", "term"]
+
+enableEmoji = true
+enableRobotsTXT = true
+canonifyURLs = true
+
+[languages]
+  [languages.en]
+    languageName = "English"
+    languageCode = "en-us"
+    weight = 1
+
+[params]
+  Author = "anuragdevon"
+  Description = "Track every subscription. Never overpay again."
