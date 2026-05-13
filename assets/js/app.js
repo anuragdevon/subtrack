@@ -122,7 +122,18 @@ function handleAuthChange(firebaseUser) {
     welcomeAuthDone = true;
     tryDismissWelcome();
   } else {
-    loadFromFirestore();
+    // User signed in while welcome screen was still showing (sign-in button tap)
+    var ws = document.getElementById('welcome-screen');
+    if (ws && !ws.classList.contains('hidden')) {
+      ws.classList.add('welcome-exit');
+      setTimeout(function() {
+        ws.classList.add('hidden');
+        ws.classList.remove('welcome-exit');
+        loadFromFirestore();
+      }, 350);
+    } else {
+      loadFromFirestore();
+    }
   }
   authInitialized = true;
 }
