@@ -21,10 +21,11 @@ const EMOJI_PRESETS = [
   '🏃', '🎯', '💼', '🔐',
 ];
 
-const STORAGE_KEY = 'st_data_v1';
+const LS_DOCID    = 'st_docid';
+const LS_DATA_PRE = 'st_data_';
 
 // ============================================================
-// FIREBASE — replace with your project config
+// FIREBASE CONFIG
 // ============================================================
 
 const FIREBASE_CONFIG = {
@@ -36,33 +37,215 @@ const FIREBASE_CONFIG = {
   appId:             '1:111959728102:web:49d8fd7ca45f8bddfd0027',
 };
 
-let db = null;
-let subsCol = null;
-let syncActive = false;
+// ============================================================
+// FIREBASE / AUTH STATE
+// ============================================================
+
+let db                  = null;
+let auth                = null;
+let currentFirebaseUser = null;
+let currentDocId        = null;
+let unsubscribeSync     = null;
+let authInitialized     = false;
+let welcomeTimerDone    = false;
+let welcomeAuthDone     = false;
+let welcomeAuthUser     = undefined;
+
+// ============================================================
+// APP STATE
+// ============================================================
+
+var subs             = [];
+var editingId        = null;
+var currentTab       = 'dashboard';
+var selectedCategory = null;
+var selectedCycle    = 'monthly';
+var chartCategory    = null;
+
+// ============================================================
+// FIREBASE INIT
+// ============================================================
 
 function initFirebase() {
-  if (FIREBASE_CONFIG.apiKey.startsWith('REPLACE')) return false;
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.firestore();
+    db   = firebase.firestore();
+    auth = firebase.auth();
     db.enablePersistence({ synchronizeTabs: true }).catch(function() {});
-    subsCol = db.collection('subs');
-    return true;
-  } catch (e) {
-    return false;
+    auth.onAuthStateChanged(handleAuthChange);
+  } catch(e) {
+    // Firebase unavailable — skip to app
+    welcomeAuthDone = true;
+    welcomeAuthUser = null;
+    tryDismissWelcome();
   }
 }
 
 // ============================================================
-// STATE
+// AUTH FLOW
 // ============================================================
 
-var subs = [];
-var editingId = null;
-var currentTab = 'dashboard';
-var selectedCategory = null;
-var selectedCycle = 'monthly';
-var chartCategory = null;
+function handleAuthChange(firebaseUser) {
+  if (!firebaseUser) {
+    if (authInitialized) {
+      // User signed out while app was open
+      currentFirebaseUser = null;
+      currentDocId = null;
+      subs = [];
+      if (unsubscribeSync) { unsubscribeSync(); unsubscribeSync = null; }
+      document.getElementById('signin-overlay').classList.remove('hidden');
+    } else {
+      // First auth check resolved to signed-out
+      welcomeAuthUser = null;
+      welcomeAuthDone = true;
+      tryDismissWelcome();
+    }
+    authInitialized = true;
+    return;
+  }
+
+  document.getElementById('signin-overlay').classList.add('hidden');
+  currentFirebaseUser = firebaseUser;
+
+  var docId = firebaseUser.uid;
+  if (currentDocId !== docId) {
+    currentDocId = docId;
+    localStorage.setItem(LS_DOCID, docId);
+    var cached = localStorage.getItem(LS_DATA_PRE + docId);
+    try { subs = cached ? JSON.parse(cached) : []; } catch(e) { subs = []; }
+  }
+
+  updateUserAvatar(firebaseUser);
+
+  if (!authInitialized) {
+    welcomeAuthUser = firebaseUser;
+    welcomeAuthDone = true;
+    tryDismissWelcome();
+  } else {
+    loadFromFirestore();
+  }
+  authInitialized = true;
+}
+
+function tryDismissWelcome() {
+  if (!welcomeTimerDone || !welcomeAuthDone) return;
+  var screen = document.getElementById('welcome-screen');
+  if (!screen || screen.classList.contains('hidden')) return;
+
+  if (!welcomeAuthUser) {
+    // Show sign-in button, keep welcome screen visible
+    document.getElementById('btn-welcome-signin').classList.remove('hidden');
+    return;
+  }
+
+  screen.classList.add('welcome-exit');
+  setTimeout(function() {
+    screen.classList.add('hidden');
+    screen.classList.remove('welcome-exit');
+    loadFromFirestore();
+  }, 350);
+}
+
+function signIn() {
+  if (!auth) return;
+  var provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(function(e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
+      auth.signInWithRedirect(provider).catch(function() {});
+    }
+  });
+}
+
+function signOut() {
+  if (!auth) return;
+  closeProfileSheet();
+  auth.signOut().catch(function() {});
+}
+
+function updateUserAvatar(firebaseUser) {
+  var img  = document.getElementById('user-avatar-img');
+  var text = document.getElementById('user-avatar-text');
+  var pImg = document.getElementById('profile-avatar-img');
+  var pTxt = document.getElementById('profile-avatar-text');
+  if (!firebaseUser) return;
+  var initials = (firebaseUser.displayName || firebaseUser.email || '?').charAt(0).toUpperCase();
+  if (firebaseUser.photoURL) {
+    if (img)  { img.src = firebaseUser.photoURL; img.classList.remove('hidden'); }
+    if (text) { text.classList.add('hidden'); }
+    if (pImg) { pImg.src = firebaseUser.photoURL; pImg.classList.remove('hidden'); }
+    if (pTxt) { pTxt.classList.add('hidden'); }
+  } else {
+    if (img)  { img.classList.add('hidden'); }
+    if (text) { text.textContent = initials; text.classList.remove('hidden'); }
+    if (pImg) { pImg.classList.add('hidden'); }
+    if (pTxt) { pTxt.textContent = initials; pTxt.classList.remove('hidden'); }
+  }
+  var nameEl  = document.getElementById('profile-name');
+  var emailEl = document.getElementById('profile-email');
+  if (nameEl)  nameEl.textContent  = firebaseUser.displayName || '';
+  if (emailEl) emailEl.textContent = firebaseUser.email || '';
+}
+
+function openProfileSheet() {
+  document.getElementById('profile-sheet-overlay').classList.remove('hidden');
+}
+
+function closeProfileSheet() {
+  document.getElementById('profile-sheet-overlay').classList.add('hidden');
+}
+
+// ============================================================
+// FIRESTORE — user-scoped
+// ============================================================
+
+function userDocRef() {
+  if (!db || !currentDocId) return null;
+  return db.collection('users').doc(currentDocId);
+}
+
+function loadFromFirestore() {
+  var ref = userDocRef();
+  if (!ref) {
+    switchTab(subs.length ? 'dashboard' : 'add');
+    return;
+  }
+  ref.get().then(function(snap) {
+    if (snap.exists) {
+      subs = snap.data().items || [];
+      localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
+    }
+    switchTab(subs.length ? 'dashboard' : 'add');
+    startSync();
+  }).catch(function() {
+    switchTab(subs.length ? 'dashboard' : 'add');
+  });
+}
+
+function saveData() {
+  if (currentDocId) {
+    localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
+  }
+  var ref = userDocRef();
+  if (ref) {
+    ref.set({ items: subs }).catch(function() {});
+  }
+}
+
+function startSync() {
+  if (unsubscribeSync) { unsubscribeSync(); unsubscribeSync = null; }
+  var ref = userDocRef();
+  if (!ref) return;
+  unsubscribeSync = ref.onSnapshot(function(snap) {
+    if (snap.exists) {
+      var remote = snap.data().items || [];
+      if (JSON.stringify(remote) !== JSON.stringify(subs)) {
+        subs = remote;
+        if (currentDocId) localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
+        renderCurrentTab();
+      }
+    }
+  }, function() {});
+}
 
 // ============================================================
 // HELPERS
@@ -131,45 +314,6 @@ function defaultRenewalDate(cycle) {
   if (cycle === 'annual') d.setFullYear(d.getFullYear() + 1);
   else d.setMonth(d.getMonth() + 1);
   return d.toISOString().split('T')[0];
-}
-
-// ============================================================
-// STORAGE
-// ============================================================
-
-function loadData() {
-  try {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) subs = JSON.parse(raw);
-  } catch (e) {
-    subs = [];
-  }
-}
-
-function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(subs));
-  if (subsCol) {
-    subsCol.doc('data').set({ items: subs }).catch(function() {});
-  }
-}
-
-// ============================================================
-// FIREBASE SYNC
-// ============================================================
-
-function startSync() {
-  if (!subsCol || syncActive) return;
-  syncActive = true;
-  subsCol.doc('data').onSnapshot(function(snap) {
-    if (snap.exists) {
-      var remote = snap.data().items || [];
-      if (JSON.stringify(remote) !== JSON.stringify(subs)) {
-        subs = remote;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(subs));
-        renderCurrentTab();
-      }
-    }
-  }, function() { syncActive = false; });
 }
 
 // ============================================================
@@ -266,7 +410,6 @@ function resetForm() {
   document.getElementById('btn-cancel-edit').classList.add('hidden');
   document.getElementById('btn-submit').textContent = 'Add Subscription';
   document.getElementById('btn-submit').disabled = true;
-  // reset emoji preset highlight
   document.querySelectorAll('.emoji-btn').forEach(function(btn) {
     btn.classList.remove('chip-active');
   });
@@ -323,14 +466,13 @@ function renderDashboard() {
   var annual   = active.reduce(function(sum, s) { return sum + annualAmt(s); }, 0);
   var inactive = subs.filter(function(s) { return !s.active; }).length;
 
-  document.getElementById('hero-monthly').textContent   = fmt(monthly);
+  document.getElementById('hero-monthly').textContent    = fmt(monthly);
   document.getElementById('hero-annual-sub').textContent = fmt(annual) + '/yr · ' + active.length + ' active';
-  document.getElementById('stat-monthly').textContent   = fmt(monthly);
-  document.getElementById('stat-annual').textContent    = fmt(annual);
-  document.getElementById('stat-active').textContent    = active.length;
-  document.getElementById('stat-inactive').textContent  = inactive;
+  document.getElementById('stat-monthly').textContent    = fmt(monthly);
+  document.getElementById('stat-annual').textContent     = fmt(annual);
+  document.getElementById('stat-active').textContent     = active.length;
+  document.getElementById('stat-inactive').textContent   = inactive;
 
-  // Upcoming renewals (within 30 days)
   var upcoming = subs
     .filter(function(s) {
       var d = daysUntil(s.renewsOn);
@@ -345,13 +487,9 @@ function renderDashboard() {
     upcomingSection.classList.add('hidden');
   } else {
     upcomingSection.classList.remove('hidden');
-    upcomingList.innerHTML = upcoming.map(function(s) {
-      var rl = renewalLabel(s.renewsOn);
-      return renderSubCard(s, true);
-    }).join('');
+    upcomingList.innerHTML = upcoming.map(function(s) { return renderSubCard(s, true); }).join('');
   }
 
-  // Full list
   var recentEl = document.getElementById('recent-list');
   if (subs.length === 0) {
     recentEl.innerHTML = '<div class="py-12 text-center"><div class="text-5xl mb-3">💳</div><div class="c-text-3 text-sm font-medium">No subscriptions yet</div><div class="c-text-3 text-xs mt-1">Tap + to add your first one</div></div>';
@@ -369,7 +507,6 @@ function renderSubs() {
     return;
   }
 
-  // Group by category
   var grouped = {};
   subs.forEach(function(s) {
     if (!grouped[s.category]) grouped[s.category] = [];
@@ -378,8 +515,8 @@ function renderSubs() {
 
   var html = '';
   Object.keys(grouped).forEach(function(cat) {
-    var items     = grouped[cat];
-    var catDef    = CATEGORIES.find(function(c) { return c.name === cat; }) || { emoji: '📦' };
+    var items      = grouped[cat];
+    var catDef     = CATEGORIES.find(function(c) { return c.name === cat; }) || { emoji: '📦' };
     var catMonthly = items
       .filter(function(s) { return s.active; })
       .reduce(function(sum, s) { return sum + monthlyAmt(s); }, 0);
@@ -443,11 +580,9 @@ function renderInsights() {
   var annual  = active.reduce(function(sum, s) { return sum + annualAmt(s); }, 0);
   var perDay  = monthly / 30;
 
-  // Top 5 by monthly cost
   var top5   = active.slice().sort(function(a, b) { return monthlyAmt(b) - monthlyAmt(a); }).slice(0, 5);
   var maxAmt = monthlyAmt(top5[0]);
 
-  // Category totals
   var catTotals = {};
   active.forEach(function(s) {
     catTotals[s.category] = (catTotals[s.category] || 0) + monthlyAmt(s);
@@ -575,8 +710,8 @@ function initSwipeListeners() {
       currentX = x;
       var diff = Math.min(0, currentX - startX);
       if (diff < -5) {
-        inner.style.transform       = 'translateX(' + Math.max(-80, diff) + 'px)';
-        deleteAction.style.opacity  = Math.min(1, Math.abs(diff) / 60);
+        inner.style.transform      = 'translateX(' + Math.max(-80, diff) + 'px)';
+        deleteAction.style.opacity = Math.min(1, Math.abs(diff) / 60);
       }
     }
     function onEnd() {
@@ -675,8 +810,8 @@ function renderEmojiPresets() {
 var toastTimer;
 
 function showToast(msg) {
-  var el       = document.getElementById('toast');
-  el.textContent = msg;
+  var el = document.getElementById('toast');
+  el.textContent   = msg;
   el.style.opacity = '1';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(function() { el.style.opacity = '0'; }, 2200);
@@ -710,7 +845,6 @@ function toggleTheme() {
 document.addEventListener('DOMContentLoaded', function() {
   applyTheme(localStorage.getItem('st_theme') || 'dark');
 
-  loadData();
   renderCategoryChips();
   renderEmojiPresets();
   setCycle('monthly');
@@ -723,19 +857,11 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('inp-name').addEventListener('input', validateForm);
   document.getElementById('inp-amount').addEventListener('input', validateForm);
 
-  var fbOk = initFirebase();
-  if (fbOk) {
-    subsCol.doc('data').get().then(function(snap) {
-      if (snap.exists) {
-        subs = snap.data().items || [];
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(subs));
-      }
-      switchTab(subs.length ? 'dashboard' : 'add');
-      startSync();
-    }).catch(function() {
-      switchTab(subs.length ? 'dashboard' : 'add');
-    });
-  } else {
-    switchTab(subs.length ? 'dashboard' : 'add');
-  }
+  // Minimum welcome screen display time
+  setTimeout(function() {
+    welcomeTimerDone = true;
+    tryDismissWelcome();
+  }, 1400);
+
+  initFirebase();
 });
