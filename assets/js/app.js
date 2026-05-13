@@ -28,12 +28,12 @@ const STORAGE_KEY = 'st_data_v1';
 // ============================================================
 
 const FIREBASE_CONFIG = {
-  apiKey:            'REPLACE_WITH_YOUR_API_KEY',
-  authDomain:        'REPLACE_WITH_YOUR_AUTH_DOMAIN',
-  projectId:         'REPLACE_WITH_YOUR_PROJECT_ID',
-  storageBucket:     'REPLACE_WITH_YOUR_STORAGE_BUCKET',
-  messagingSenderId: 'REPLACE_WITH_YOUR_SENDER_ID',
-  appId:             'REPLACE_WITH_YOUR_APP_ID',
+  apiKey:            'AIzaSyBFCOT5ltBOggVTTMyMfP0DYijkIyB3xfc',
+  authDomain:        'subtrack-310bf.firebaseapp.com',
+  projectId:         'subtrack-310bf',
+  storageBucket:     'subtrack-310bf.firebasestorage.app',
+  messagingSenderId: '111959728102',
+  appId:             '1:111959728102:web:49d8fd7ca45f8bddfd0027',
 };
 
 let db = null;
