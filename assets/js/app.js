@@ -72,6 +72,7 @@ function initFirebase() {
     db   = firebase.firestore();
     auth = firebase.auth();
     db.enablePersistence({ synchronizeTabs: true }).catch(function() {});
+    auth.getRedirectResult().catch(function() {});
     auth.onAuthStateChanged(handleAuthChange);
   } catch(e) {
     // Firebase unavailable — skip to app
@@ -160,11 +161,16 @@ function tryDismissWelcome() {
 function signIn() {
   if (!auth) return;
   var provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithPopup(provider).catch(function(e) {
-    if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
-      auth.signInWithRedirect(provider).catch(function() {});
-    }
-  });
+  var isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (isLocal) {
+    auth.signInWithPopup(provider).catch(function(e) {
+      if (e.code === 'auth/popup-blocked') {
+        auth.signInWithRedirect(provider).catch(function() {});
+      }
+    });
+  } else {
+    auth.signInWithRedirect(provider).catch(function() {});
+  }
 }
 
 function signOut() {
