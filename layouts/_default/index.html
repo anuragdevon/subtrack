@@ -3,28 +3,46 @@
 
 
   <!-- ========== WELCOME SCREEN ========== -->
-  <div id="welcome-screen" class="welcome-screen fixed inset-0 z-[200] flex flex-col items-center justify-center">
-    <div class="text-center px-8">
-      <div class="text-7xl mb-6" style="animation:welcomeBounce 0.6s ease">💳</div>
-      <h1 class="text-4xl font-bold text-white tracking-tight mb-2">Subtrack</h1>
-      <p class="text-base mb-10" style="color:rgba(226,232,240,0.4)">Track every subscription.</p>
-      <button id="btn-welcome-signin" class="signin-btn hidden" onclick="signIn()">
+  <div id="welcome-screen" class="welcome-screen fixed inset-0 z-[200] flex flex-col items-center justify-center overflow-hidden">
+    <div class="welcome-orb welcome-orb-1"></div>
+    <div class="welcome-orb welcome-orb-2"></div>
+    <div class="welcome-content flex flex-col items-center text-center px-8 relative z-10">
+      <div class="welcome-icon-wrap wu-icon">
+        <div class="welcome-icon-ring"></div>
+        <span class="welcome-icon-emoji">💳</span>
+      </div>
+      <h1 class="welcome-title wu-title">Subtrack</h1>
+      <p class="welcome-sub wu-sub">Track every subscription.<br>Stay on top of your spend.</p>
+      <div class="welcome-features wu-features">
+        <span>💳 Track subs</span>
+        <span class="welcome-dot">·</span>
+        <span>📊 Insights</span>
+        <span class="welcome-dot">·</span>
+        <span>🔔 Renewal alerts</span>
+      </div>
+      <button id="btn-welcome-signin" class="signin-btn" onclick="signIn()">
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" style="width:18px;height:18px">
-        Sign in with Google
+        Continue with Google
       </button>
+      <p class="welcome-legal wu-legal">By continuing you agree to our terms of service.</p>
     </div>
   </div>
 
 
   <!-- ========== SIGN-IN OVERLAY (post sign-out) ========== -->
-  <div id="signin-overlay" class="hidden fixed inset-0 z-[150] flex flex-col items-center justify-center" style="background:var(--bg)">
-    <div class="text-center px-8">
-      <div class="text-6xl mb-5">💳</div>
-      <h2 class="text-2xl font-bold text-white mb-1">Subtrack</h2>
-      <p class="text-sm mb-8" style="color:rgba(226,232,240,0.4)">Sign in to continue</p>
-      <button class="signin-btn" onclick="signIn()">
+  <div id="signin-overlay" class="hidden fixed inset-0 z-[150] flex flex-col items-center justify-center overflow-hidden" style="background:var(--bg)">
+    <div class="welcome-orb welcome-orb-1"></div>
+    <div class="welcome-orb welcome-orb-2"></div>
+    <div class="flex flex-col items-center text-center px-8 relative z-10">
+      <div class="welcome-icon-wrap mb-6">
+        <div class="welcome-icon-ring"></div>
+        <span class="welcome-icon-emoji">💳</span>
+      </div>
+      <h2 class="text-2xl font-bold text-white mb-1">Welcome back</h2>
+      <p class="text-sm mb-8 text-white/30">Sign in to continue to Subtrack</p>
+      <button class="signin-btn signin-visible" onclick="signIn()">
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" style="width:18px;height:18px">
-        Sign in with Google
+        Continue with Google
       </button>
     </div>
   </div>

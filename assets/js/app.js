@@ -144,8 +144,12 @@ function tryDismissWelcome() {
   if (!screen || screen.classList.contains('hidden')) return;
 
   if (!welcomeAuthUser) {
-    // Show sign-in button, keep welcome screen visible
-    document.getElementById('btn-welcome-signin').classList.remove('hidden');
+    var content = screen.querySelector('.welcome-content');
+    var btn = document.getElementById('btn-welcome-signin');
+    requestAnimationFrame(function() {
+      content && content.classList.add('btn-shown');
+      requestAnimationFrame(function() { btn && btn.classList.add('signin-visible'); });
+    });
     return;
   }
 
