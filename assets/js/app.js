@@ -46,6 +46,10 @@ let auth                = null;
 let currentFirebaseUser = null;
 let currentDocId        = null;
 let unsubscribeSync     = null;
+// False until this device has read the cloud copy. Until then local data may be
+// stale, so saves stay local instead of overwriting newer data in Firestore.
+let cloudReady          = false;
+let cloudPending        = false;
 let authInitialized     = false;
 let welcomeTimerDone    = false;
 let welcomeAuthDone     = false;
@@ -224,16 +228,8 @@ function loadFromFirestore() {
     switchTab(subs.length ? 'dashboard' : 'add');
     return;
   }
-  ref.get().then(function(snap) {
-    if (snap.exists) {
-      subs = snap.data().items || [];
-      localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
-    }
-    switchTab(subs.length ? 'dashboard' : 'add');
-    startSync();
-  }).catch(function() {
-    switchTab(subs.length ? 'dashboard' : 'add');
-  });
+  switchTab(subs.length ? 'dashboard' : 'add');
+  startSync();
 }
 
 function saveData() {
@@ -241,25 +237,47 @@ function saveData() {
     localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
   }
   var ref = userDocRef();
-  if (ref) {
-    ref.set({ items: subs }).catch(function() {});
-  }
+  if (!ref) return;
+  // Opened offline: fall back to Firestore's offline queue as before.
+  if (!cloudReady && navigator.onLine) { cloudPending = true; return; }
+  ref.set({ items: subs }).catch(function(e) { console.warn('Firestore save error:', e); });
 }
 
 function startSync() {
   if (unsubscribeSync) { unsubscribeSync(); unsubscribeSync = null; }
   var ref = userDocRef();
   if (!ref) return;
+  cloudReady = false;
   unsubscribeSync = ref.onSnapshot(function(snap) {
-    if (snap.exists) {
-      var remote = snap.data().items || [];
-      if (JSON.stringify(remote) !== JSON.stringify(subs)) {
-        subs = remote;
-        if (currentDocId) localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
-        renderCurrentTab();
-      }
-    }
-  }, function() {});
+    if (snap.exists) applyRemote(snap.data().items || []);
+  }, function(e) { console.warn('Firestore sync error:', e); });
+  confirmCloud(ref, 2000);
+}
+
+function applyRemote(remote) {
+  if (JSON.stringify(remote) === JSON.stringify(subs)) return;
+  subs = remote;
+  if (currentDocId) localStorage.setItem(LS_DATA_PRE + currentDocId, JSON.stringify(subs));
+  renderCurrentTab();
+}
+
+// Read the doc from the server (retrying with backoff) before allowing uploads.
+function confirmCloud(ref, delay) {
+  ref.get({ source: 'server' }).then(function(snap) {
+    if (ref.id !== currentDocId) return;
+    var wasEmpty = !subs.length;
+    if (snap.exists) applyRemote(snap.data().items || []);
+    if (wasEmpty && subs.length) switchTab('dashboard');
+    cloudReady = true;
+    // No cloud doc yet: local changes are the only copy — upload them.
+    if (!snap.exists && cloudPending) saveData();
+    cloudPending = false;
+  }).catch(function(e) {
+    console.warn('Cloud read failed, retrying:', e);
+    setTimeout(function() {
+      if (ref.id === currentDocId && !cloudReady) confirmCloud(ref, Math.min(delay * 2, 30000));
+    }, delay);
+  });
 }
 
 // ============================================================
